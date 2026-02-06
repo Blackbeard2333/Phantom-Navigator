@@ -1,6 +1,7 @@
 # Phantom-Navigator
-# Visual-Lidar UAV Tracking and Spoofing Pipeline
+## Submission Artifact for USENIX-2026
 
+## Real-world Experiments Pipeline
 ## Sensor bringups
 ### Building and sourcing
 ```
@@ -110,47 +111,7 @@ ros2 launch cpsl_px4_bridge vicon_to_px4_ev.launch.py
 ros2 launch cpsl_px4_bridge spoof_vicon_to_px4_ev.launch.py
 ```
 
-### Launch the waypoint controller
+### Launch the victim waypoint controller
 ```
 ros2 launch cpsl_px4_vicon_controller waypoint_mission_launch.py   params_file:=/home/cpsl/Documents/CPSL_ROS2_PX4/src/cpsl_px4_vicon_controller/cpsl_px4_vicon_controller/config/mission_example.yaml
 ```
-
-## Recording ROS2 topics
-```
-/camera/camera/color/image_raw
-/visual_detection/bbox_image
-/cpsl_uav_1/livox/lidar
-/camera_lidar_fusion/frustum_filtered
-/camera_lidar_fusion/uav_cluster
-/tracked_uav_cluster
-/tracked_uav_pose
-/tracked_uav_velocity
-/vicon/x500_3/x500_3
-/vicon/x500_4/x500_4
-```
-
-```
-ros2 bag record -o $YOUR_BAG_NAME /tf /tf_static /visual_detection/bbox_image /tracked_uav_pose /tracked_uav_cluster /tracked_uav_velocity /spoofing_accel_cmd /spoofing_velocity_cmd /spoofing_position_cmd /vicon/x500_3/x500_3 /vicon/x500_4/x500_4 
-```
-
-```
-ros2 bag record -o rosbag_100801 /tf /tf_static /cpsl_uav_1/livox/lidar /camera/camera/color/image_raw /camera/camera/color/camera_info /visual_detection/detections /visual_detection/bbox_image /camera_lidar_fusion/frustum_filtered /camera_lidar_fusion/uav_cluster /tracked_uav_pose /tracked_uav_cluster /tracked_uav_velocity /tracked_uav_pose_vicon /spoofing_position_cmd_vicon /vicon/x500_3/x500_3 /vicon/x500_4/x500_4 
-```
-
-### Collect attack results (no perception data)
-ros2 bag record -o rosbag_102201_5_attacks /tf /tf_static /cpsl_uav_4/fmu/out/vehicle_odometry /tracked_uav_pose_vicon /spoofing_position_cmd_vicon /redirection_commander/target /vicon/x500_3/x500_3 /vicon/x500_4/x500_4
-
-
-### Collect attack results with perception data
-ros2 bag record -o rosbag_102301_track_attack /tf /tf_static /cpsl_uav_1/livox/lidar /camera/camera/color/image_raw /camera/camera/color/camera_info /visual_detection/detections /visual_detection/bbox_image /camera_lidar_fusion/frustum_filtered /camera_lidar_fusion/uav_cluster /tracked_uav_pose /tracked_uav_cluster /tracked_uav_velocity /tracked_uav_pose_vicon /spoofing_position_cmd_vicon /vicon/x500_3/x500_3 /vicon/x500_4/x500_4 /cpsl_uav_4/fmu/out/vehicle_odometry
-
-### Collect outdoor tracking dataset
-ros2 bag record -o rosbag_110403_outdoor_track /tf /tf_static /cpsl_uav_1/livox/lidar /camera/camera/color/image_raw /camera/camera/color/camera_info /visual_detection/detections /visual_detection/bbox_image /camera_lidar_fusion/frustum_filtered /camera_lidar_fusion/uav_cluster /tracked_uav_pose /tracked_uav_cluster /tracked_uav_velocity /fmu/out/vehicle_gps_position /fmu/out/vehicle_local_position /fmu/out/vehicle_odometry /cpsl_uav_4/fmu/out/vehicle_gps_position /cpsl_uav_4/fmu/out/vehicle_local_position /cpsl_uav_4/fmu/out/vehicle_odometry 
-
-
-### Outdoor tracking and spoofing
-ros2 bag record -o rosbag_110901_track_and_spoof_01 /tf /tf_static /cpsl_uav_1/livox/lidar /camera/camera/color/image_raw /camera/camera/color/camera_info /visual_detection/detections /visual_detection/bbox_image /camera_lidar_fusion/frustum_filtered /camera_lidar_fusion/uav_cluster /tracked_uav_pose /tracked_uav_cluster /tracked_uav_velocity /fmu/out/vehicle_gps_position /fmu/out/vehicle_local_position /fmu/out/vehicle_odometry /fmu/out/vehicle_attitude /victim/estimated_sensor_gps /victim/estimated_local_position /spoofing_gps_bias/latlon /spoofing_gps_bias/ned
-
-
-## ros domian id
-export ROS_DOMAIN_ID=11
