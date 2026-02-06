@@ -1,0 +1,469 @@
+% Close-loop GPS Spoofing Attack Pipeline for repeated experiments
+% Monte-Carlo Verification for Spoofing Range Analysis
+% Aggregated results on different missions
+% clear;
+
+% rng(42);  % Lock random seed
+set(groot, 'DefaultAxesFontName', 'Times New Roman');
+
+% MATLAB Time-related Parameters
+Time = 400;
+sampleTime = 0.01;
+T = Time * (1 / sampleTime) + 1;
+numSteps = Time * (1 / sampleTime) + 1;
+time = sampleTime * (0:numSteps - 1);
+time = time';
+
+% Attacker identification and tracking model
+attack_pos_noise_level = 0.5;
+attack_vel_noise_level = 0.1;
+
+target_radius_value = 10;
+target_radius = target_radius_value * ones(length(time), 1);
+Target_R = timeseries(target_radius, time);
+
+% System profiles
+% Physical parameters
+quad_model;
+Quad_Model = struct(...
+    'Ixx', 0.016, ...
+    'Iyy', 0.016, ...
+    'Izz', 0.0274, ...
+    'Im', 3.789e-6, ...
+    'mass', 1, ...
+    'g', 9.8);
+
+% Sensor profiles
+system_noise = 0.1;
+gps_pos_noise = 0.5;
+gps_vel_noise = 0.01;
+
+imu_acc_noise = sqrt(0.0012356);
+imu_gyro_noise = sqrt(deg2rad(0.025));
+imu_mag_noise = sqrt(0.3 / sqrt(50));
+
+% Anomaly detector statistics
+% % % Parameters for gps noise 0.5
+Gamma = timeseries(2.04, time);
+Delta_1 = timeseries(3.4, time);
+Delta_2 = timeseries(0.75, time);
+
+%% Monte Carlo Evaluation over Multiple Trajectories and Attack Times
+
+num_trajectories = 1;
+num_attacks_per_traj = 3;
+
+% Store stats
+errors_case_1_all = zeros(num_trajectories, num_attacks_per_traj);
+errors_case_2_all = zeros(num_trajectories, num_attacks_per_traj);
+errors_case_3_all = zeros(num_trajectories, num_attacks_per_traj);
+
+capacities_case_1_all = zeros(num_trajectories, num_attacks_per_traj);
+capacities_case_2_all = zeros(num_trajectories, num_attacks_per_traj);
+capacities_case_3_all = zeros(num_trajectories, num_attacks_per_traj);
+
+% Store results
+results_table = table();
+
+for traj_idx = 1:num_trajectories
+    %% Generate Random Trajectory
+
+    fprintf('--- Generating Trajectory %d/%d ---\n', traj_idx, num_trajectories);
+    num_waypoints = 5;
+    T_random = linspace(0, 400, num_waypoints);
+    destination_angle = 2 * pi * rand(1);
+    random_dest_x = 1000 * cos(destination_angle);
+    random_dest_y = 1000 * sin(destination_angle);
+
+    dx = linspace(0, random_dest_x, num_waypoints)';
+    dy = linspace(0, random_dest_y, num_waypoints)';
+    random_z = ones(num_waypoints, 1) * 10;
+
+    zigzag_noise_x = (rand(num_waypoints, 1) - 0.5) * 200;
+    zigzag_noise_y = (rand(num_waypoints, 1) - 0.5) * 200;
+    zigzag_noise_x(1) = 0;
+    zigzag_noise_y(1) = 0;
+    dx = dx + zigzag_noise_x;
+    dy = dy + zigzag_noise_y;
+    Waypoints = [dx, dy, random_z];
+    WaypointSeries = timeseries(Waypoints, T_random);
+
+    %% Run simulation without attack
+    % Attack Stastistics
+    s_norm_value = 10;
+    s_norm_limit = s_norm_value * ones(length(time), 1);
+    S_Norm = timeseries(s_norm_limit, time);
+    
+    delta_s_value = 0.0;
+    delta_s_limit = delta_s_value * ones(length(time), 1);
+    Delta_S_Lim = timeseries(delta_s_limit, time);
+    
+    % Attack Starting time
+    attack_start_time = 0;
+    attack_start_time_s = attack_start_time * ones(length(time), 1);
+    Attack_Start_T = timeseries(attack_start_time_s, time);
+
+    Spoofing_Target = timeseries(zeros(length(time), 2), time);
+
+    % Noise passed to Simulink
+    attack_pos_noise = attack_pos_noise_level * randn(numSteps, 3);
+    attack_vel_noise = attack_vel_noise_level * randn(numSteps, 3);
+    attacker_combined_noise = [attack_pos_noise, attack_vel_noise];
+    Attacker_Noise = timeseries(attacker_combined_noise, time);
+    GPS_Position_Noise = timeseries(gps_pos_noise * randn(numSteps, 3), time);
+    GPS_Velocity_Noise = timeseries(gps_vel_noise * randn(numSteps, 3), time);
+    IMU_Acc_Noise = timeseries(imu_acc_noise * randn(numSteps, 3), time);
+    IMU_Gyro_Noise = timeseries(imu_gyro_noise * randn(numSteps, 3), time);
+    IMU_Mag_Noise = timeseries(imu_mag_noise * randn(numSteps, 3), time);
+    System_Noise = timeseries(system_noise * randn(numSteps, 12), time);
+
+    sim('Quad_PID_FUSION_Close_Loop.slx');
+    pos_x_traj_no_attack = squeeze(logsout.get('pos_x_fused').Values.Data);
+    pos_y_traj_no_attack = squeeze(logsout.get('pos_y_fused').Values.Data);
+    vel_x_traj_no_attack = squeeze(logsout.get('vel_x_fused').Values.Data);
+    vel_y_traj_no_attack = squeeze(logsout.get('vel_y_fused').Values.Data);
+
+    %% For each attack time
+    for atk_idx = 1:num_attacks_per_traj
+        fprintf('  > Attack Time %d/%d (Trajectory %d)\n', atk_idx, num_attacks_per_traj, traj_idx);
+        
+        % Attack Stastistics
+        s_norm_value = 10;
+        s_norm_limit = s_norm_value * ones(length(time), 1);
+        S_Norm = timeseries(s_norm_limit, time);
+        
+        delta_s_value = 1.0;
+        delta_s_limit = delta_s_value * ones(length(time), 1);
+        Delta_S_Lim = timeseries(delta_s_limit, time);
+        
+        % Attack Starting time
+        attack_start_time = rand() * 100;
+        % attack_start_time = 50;
+        Attack_Start_T = timeseries(attack_start_time * ones(length(time),1), time);
+
+        dt = 0.01;
+        T_to_pred = Time - attack_start_time;
+        attack_start_id = round(attack_start_time / dt) + 1;
+
+        % Initial State
+        x_0 = [pos_x_traj_no_attack(attack_start_id), pos_y_traj_no_attack(attack_start_id), ...
+               vel_x_traj_no_attack(attack_start_id), vel_y_traj_no_attack(attack_start_id)]';
+        x_s_0 = [0; 0; 0; 0];
+
+        % Acceleration samples
+        num_directions = 1000;
+        angles = linspace(0, 2*pi, num_directions+1); angles(end) = [];
+        u_cases = delta_s_value * [cos(angles)', sin(angles)'];
+
+        % Case 1
+        destination = Waypoints(end, :);
+        current_pos = x_0(1:2)';
+        current_vel = x_0(3:4)';
+        T_est_1 = compute_shortest_flight_time(destination(1:2), current_pos, current_vel);
+        [reachable_positions_case_1, hull_indices_case_1] = computeConvexHull(T_est_1, x_0, x_s_0, dt, u_cases, 0);
+
+        % Case 2
+        Remaining_Waypoints = get_remaining_waypoints(Waypoints, pos_x_traj_no_attack, pos_y_traj_no_attack, attack_start_id, 10);
+        T_est_2 = compute_time_through_waypoints(Remaining_Waypoints, current_pos, current_vel);
+        [reachable_positions_case_2, hull_indices_case_2] = computeConvexHull(T_est_2, x_0, x_s_0, dt, u_cases, 0);
+
+        % Case 3
+        [reachable_positions_case_3, hull_indices_case_3] = computeConvexHull(T_to_pred, x_0, x_s_0, dt, u_cases, 0);
+
+        % Case 4
+        num_targets = 200;
+        radius = 50000;
+        rand_angles = 2 * pi * rand(num_targets, 1);
+        spoofing_targets = [radius .* cos(rand_angles), radius .* sin(rand_angles)];
+        final_positions = zeros(num_targets, 2);
+
+        for j = 1:num_targets
+            fprintf('  > > Attack Time %d/%d (Trajectory %d) (Target %d) \n', atk_idx, num_attacks_per_traj, traj_idx, j);
+            Spoofing_Target = timeseries(spoofing_targets(j,:) .* ones(length(time),1), time);
+
+            % Noise passed to Simulink
+            attack_pos_noise = attack_pos_noise_level * randn(numSteps, 3);
+            attack_vel_noise = attack_vel_noise_level * randn(numSteps, 3);
+            attacker_combined_noise = [attack_pos_noise, attack_vel_noise];
+            Attacker_Noise = timeseries(attacker_combined_noise, time);
+            GPS_Position_Noise = timeseries(gps_pos_noise * randn(numSteps, 3), time);
+            GPS_Velocity_Noise = timeseries(gps_vel_noise * randn(numSteps, 3), time);
+            IMU_Acc_Noise = timeseries(imu_acc_noise * randn(numSteps, 3), time);
+            IMU_Gyro_Noise = timeseries(imu_gyro_noise * randn(numSteps, 3), time);
+            IMU_Mag_Noise = timeseries(imu_mag_noise * randn(numSteps, 3), time);
+            System_Noise = timeseries(system_noise * randn(numSteps, 12), time);
+
+            sim('Quad_PID_FUSION_Close_Loop.slx');
+            pos_x_traj = squeeze(logsout.get('pos_x').Values.Data);
+            pos_y_traj = squeeze(logsout.get('pos_y').Values.Data);
+            final_positions(j,:) = [pos_x_traj(end), pos_y_traj(end)];
+        end
+
+        % Compute areas
+        area_case_1 = polyarea(reachable_positions_case_1(1, hull_indices_case_1), reachable_positions_case_1(2, hull_indices_case_1));
+        area_case_2 = polyarea(reachable_positions_case_2(1, hull_indices_case_2), reachable_positions_case_2(2, hull_indices_case_2));
+        area_case_3 = polyarea(reachable_positions_case_3(1, hull_indices_case_3), reachable_positions_case_3(2, hull_indices_case_3));
+        % [~, area_case_4] = convhull(final_positions(:,1), final_positions(:,2));
+
+        k_case_4 = convhull(final_positions(:,1), final_positions(:,2));
+        x_case_4 = final_positions(k_case_4, 1);
+        y_case_4 = final_positions(k_case_4, 2);
+        area_case_4 = polyarea(x_case_4, y_case_4);
+
+        % Errors
+        errors_case_1_all(traj_idx, atk_idx) = abs(area_case_1 - area_case_4) / area_case_4 * 100;
+        errors_case_2_all(traj_idx, atk_idx) = abs(area_case_2 - area_case_4) / area_case_4 * 100;
+        errors_case_3_all(traj_idx, atk_idx) = abs(area_case_3 - area_case_4) / area_case_4 * 100;
+
+        capacities_case_1_all(traj_idx, atk_idx) = area_case_1 / area_case_4 * 100;
+        capacities_case_2_all(traj_idx, atk_idx) = area_case_2 / area_case_4 * 100;
+        capacities_case_3_all(traj_idx, atk_idx) = area_case_3 / area_case_4 * 100;
+
+
+        % Store result row
+        curr_row = table(traj_idx, attack_start_time, ...
+                        area_case_1, area_case_2, area_case_3, area_case_4, ...
+                        errors_case_1_all(traj_idx, atk_idx), ...
+                        errors_case_2_all(traj_idx, atk_idx), ...
+                        errors_case_3_all(traj_idx, atk_idx), ...
+                        capacities_case_1_all(traj_idx, atk_idx), ...
+                        capacities_case_2_all(traj_idx, atk_idx), ...
+                        capacities_case_3_all(traj_idx, atk_idx), ...
+                        'VariableNames', {'Trajectory', 'AttackTime', ...
+                                          'AreaCase1', 'AreaCase2', 'AreaCase3', 'AreaCase4', ...
+                                          'ErrorCase1', 'ErrorCase2', 'ErrorCase3', 'CapacityCase1', 'CapacityCase2', 'CapacityCase3'});
+        
+        results_table = [results_table; curr_row];
+    end
+end
+
+%% Plot Results
+figure(1);
+boxplot([errors_case_1_all(:), errors_case_2_all(:), errors_case_3_all(:)], ...
+        'Labels', {'Case 1', 'Case 2', 'Case 3'});
+ylabel('Estimation Error (%)');
+title('Convex Hull Approximation Accurateness(w.r.t Monte Carlo)');
+grid on;
+
+
+figure(2);
+boxplot([capacities_case_1_all(:), capacities_case_2_all(:), capacities_case_3_all(:)], ...
+        'Labels', {'Case 1', 'Case 2', 'Case 3'});
+ylabel('Estimation Capacity (%)');
+title('Convex Hull Approximation Accurateness(w.r.t Monte Carlo)');
+grid on;
+
+
+% Write results to CSV with timestamped filename
+filename = 'reachability_area_errors_ntraj1_nat_3_02.csv';
+writetable(results_table, filename);
+fprintf('Saved results to %s\n', filename);
+
+
+
+function [reachable_positions, hull_indices] = computeConvexHull(T_pred, x_0, x_s_0, dt, u_cases, intialization_case)
+    % System Dynamics f
+    A =  [1, 0, 0, 0;
+          0, 1, 0, 0;
+          0, 0, 1, 0;
+          0, 0, 0, 1];
+
+    B_1 = [1, 0, 0, 0;
+           0, 1, 0, 0;
+           0, 0, 1, 0;
+           0, 0, 0, 1];
+
+    B_0 = [0, 0;
+           0, 0;
+           dt, 0;
+           0, dt];
+
+    % Attacker dynamics f_s
+    A_s = [1, 0, dt, 0;
+           0, 1, 0, dt;
+           0, 0, 1, 0;
+           0, 0, 0, 1];
+    
+    B_s = [0, 0;
+           0, 0;
+           dt, 0;
+           0, dt];
+
+    v_min = 0;  
+    v_max = 5; 
+    num_cases = size(u_cases, 1);
+    reachable_states = zeros(4, num_cases);
+
+    % Simulate each extreme control sequence
+    for i = 1:num_cases
+  
+        u = u_cases(i,:)';  
+        u_0 = [0, 0]';
+
+        x = x_0;
+        x_s = x_0;
+
+        for t = 1:(T_pred/dt)
+            % Define noise standard deviations
+            pos_noise_std = 0.0;
+            vel_noise_std = 0.05;
+            w_t = [pos_noise_std * randn(2,1); vel_noise_std * randn(2,1)];
+            x_s = A_s * x_s + B_s * u + w_t;
+
+            v_s_norm = sqrt(x_s(3)^2 + x_s(4)^2);
+            if v_s_norm > v_max
+                x_s(3) = (x_s(3) / v_s_norm) * v_max;
+                x_s(4) = (x_s(4) / v_s_norm) * v_max;
+        
+            elseif v_s_norm < v_min
+                x_s(3) = 0;
+                x_s(4) = 0;
+            end
+
+            x = B_1 * x_s; % + B_0 * u_0;     
+
+            v_norm = sqrt(x(3)^2 + x(4)^2);
+            if v_norm > v_max
+                x(3) = (x(3) / v_norm) * v_max;
+                x(4) = (x(4) / v_norm) * v_max;
+        
+            elseif v_norm < v_min
+                x(3) = 0;
+                x(4) = 0;
+            end
+
+            
+        end
+
+        reachable_states(:,i) = x;
+    end
+
+    reachable_positions = reachable_states(1:2,:);
+    hull_indices = convhull(reachable_positions(1,:), reachable_positions(2,:));
+end
+
+
+function time_to_target = compute_shortest_flight_time(destination, current_pos, current_vel)
+% compute_shortest_flight_time computes the minimal time to reach the destination
+% under max acceleration and speed constraints.
+%
+% Inputs:
+%   destination  - [x, y] target position
+%   current_pos  - [x, y] current position
+%   current_vel  - [vx, vy] current velocity
+%
+% Output:
+%   time_to_target - shortest time (in seconds) to reach the destination
+
+    % Parameters
+    a_max = 1;      % max acceleration (m/s^2)
+    v_max = 5;      % max speed (m/s)
+
+    % Direction and distance
+    d_vec = destination - current_pos;
+    distance = norm(d_vec);
+    if distance < 1e-6
+        time_to_target = 0;
+        return;
+    end
+    dir = d_vec / distance;  % Unit direction vector
+
+    % Initial velocity along path direction
+    v0_along = dot(current_vel, dir);
+
+    % Compute peak velocity if only accel/decel used
+    v_peak = sqrt((a_max * distance) + 0.5 * v0_along^2);
+
+    if v_peak <= v_max
+        % Case 1: No cruise, just accelerate then decelerate
+        t_accel = max((v_peak - v0_along)/a_max, 0);
+        t_decel = v_peak / a_max;
+        time_to_target = t_accel + t_decel;
+    else
+        % Case 2: Accelerate to v_max, cruise, then decelerate
+        t_accel = max((v_max - v0_along)/a_max, 0);
+        d_accel = (v0_along + v_max)/2 * t_accel;
+        d_decel = (v_max^2)/(2*a_max);
+        d_cruise = distance - d_accel - d_decel;
+        t_cruise = d_cruise / v_max;
+        time_to_target = t_accel + t_cruise + (v_max / a_max);
+    end
+end
+
+function remaining_Waypoints = get_remaining_waypoints(Waypoints, pos_x_fused, pos_y_fused, attack_start_id, epsilon)
+% Returns the list of waypoints that have not yet been visited
+% A waypoint is considered visited if the drone passed within `epsilon` meters of it
+
+    if nargin < 5
+        epsilon = 0.5;  % default tolerance (meters)
+    end
+
+    % Ensure column vectors and same length
+    pos_x = pos_x_fused(1:attack_start_id);
+    pos_y = pos_y_fused(1:attack_start_id);
+    past_positions = [pos_x(:), pos_y(:)];  % Force Nx2 matrix
+
+    remaining_Waypoints = [];
+
+    for i = 1:size(Waypoints, 1)
+        wp = Waypoints(i, 1:2);  % 1x2 row vector
+        deltas = past_positions - wp;         % Nx2 - 1x2 (broadcasted correctly)
+        distances = sqrt(sum(deltas.^2, 2));  % Euclidean distances
+        if all(distances > epsilon)
+            remaining_Waypoints = [remaining_Waypoints; Waypoints(i, :)];
+        end
+    end
+end
+
+
+
+function total_time = compute_time_through_waypoints(Waypoints, current_pos, current_vel)
+% Compute the minimum time to follow a path of waypoints under acceleration and speed constraints
+
+    % Parameters
+    a_max = 1;      % max acceleration (m/s^2)
+    v_max = 5;      % max velocity (m/s)
+    
+    % Initialization
+    total_time = 0;
+    pos = current_pos;
+    vel = current_vel;
+
+    for i = 1:size(Waypoints, 1)
+        target = Waypoints(i, 1:2);
+        d_vec = target - pos;
+        dist = norm(d_vec);
+        
+        if dist < 1e-6
+            continue;  % skip if already at waypoint
+        end
+        
+        dir = d_vec / dist;
+        v0_along = dot(vel, dir);
+        
+        % Compute peak velocity if only accel/decel used
+        v_peak = sqrt((a_max * dist) + 0.5 * v0_along^2);
+        
+        if v_peak <= v_max
+            % Case 1: No cruise
+            t_accel = max((v_peak - v0_along)/a_max, 0);
+            t_decel = v_peak / a_max;
+            t_segment = t_accel + t_decel;
+            v_end = 0;  % assuming stop at each waypoint (or continue fresh)
+        else
+            % Case 2: Accel to v_max, cruise, then decel
+            t_accel = max((v_max - v0_along)/a_max, 0);
+            d_accel = (v0_along + v_max)/2 * t_accel;
+            d_decel = (v_max^2)/(2*a_max);
+            d_cruise = dist - d_accel - d_decel;
+            t_cruise = d_cruise / v_max;
+            t_segment = t_accel + t_cruise + (v_max / a_max);
+            v_end = v_max;  % approximate velocity at end
+        end
+
+        % Update state for next segment
+        pos = target;
+        vel = dir * v_end;
+        total_time = total_time + t_segment;
+    end
+end

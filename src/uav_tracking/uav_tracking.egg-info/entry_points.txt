@@ -1,0 +1,3 @@
+[console_scripts]
+detector = uav_tracking.detector:main
+tracker = uav_tracking.tracker:main

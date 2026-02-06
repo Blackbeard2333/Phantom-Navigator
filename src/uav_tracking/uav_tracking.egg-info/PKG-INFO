@@ -1,0 +1,7 @@
+Metadata-Version: 2.1
+Name: uav-tracking
+Version: 0.0.1
+Summary: Object detection and tracking from LiDAR point clouds.
+Maintainer: Your Name
+Maintainer-email: you@example.com
+License: MIT
