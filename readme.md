@@ -1,5 +1,5 @@
 # Phantom-Navigator
-## Submission Artifact for USENIX-2026
+## Submission Artifact
 
 ## Real-world Experiments Pipeline
 ## Sensor bringups
